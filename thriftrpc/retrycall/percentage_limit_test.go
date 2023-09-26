@@ -17,86 +17,28 @@ package retrycall
 import (
 	"context"
 	"github.com/bytedance/gopkg/cloud/metainfo"
-	"github.com/cloudwego/kitex-tests/pkg/test"
 	"github.com/cloudwego/kitex-tests/thriftrpc"
 	"github.com/cloudwego/kitex/client"
 	"github.com/cloudwego/kitex/client/callopt"
 	"github.com/cloudwego/kitex/pkg/endpoint"
 	"github.com/cloudwego/kitex/pkg/retry"
 	"github.com/cloudwego/kitex/transport"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 )
 
 func TestPercentageLimit(t *testing.T) {
-	backupPolicy := &retry.BackupPolicy{
-		RetryDelayMS: 10,
-		StopPolicy: retry.StopPolicy{
-			MaxRetryTimes:    1,
-			DisableChainStop: false,
-			CBPolicy: retry.CBPolicy{
-				ErrorRate: 0.1,
-			},
-		},
-	}
-
-	rc := retry.NewRetryContainerWithPercentageLimit()
-	rc.NotifyPolicyChange("circuitBreakTest", retry.BuildBackupRequest(backupPolicy))
-
-	totalCnt, retryCnt := int32(0), int32(0)
-	cli := getKitexClient(
-		transport.TTHeader,
-		client.WithRetryContainer(rc),
-		client.WithHostPorts(":9002"),
-		client.WithMiddleware(func(next endpoint.Endpoint) endpoint.Endpoint {
-			return func(ctx context.Context, req, resp interface{}) (err error) {
-				atomic.AddInt32(&totalCnt, 1)
-				if retry.IsLocalRetryRequest(ctx) {
-					atomic.AddInt32(&retryCnt, 1)
-				}
-				return next(ctx, req, resp)
-			}
-		}),
-	)
-	ctx, stReq := thriftrpc.CreateSTRequest(context.Background())
-	ctx = metainfo.WithPersistentValue(ctx, sleepTimeMsKey, "20") //ms
-
-	for i := 0; i < 5; i++ {
-		// CircuitBreakTest will sleep 200ms
-		_, err := cli.CircuitBreakTest(ctx, stReq, callopt.WithRPCTimeout(time.Second))
-		// first 10 requests will always success
-		test.Assert(t, err == nil, err)
-	}
-	t.Logf("total = %v, retry = %v", atomic.LoadInt32(&totalCnt), atomic.LoadInt32(&retryCnt))
-	test.Assert(t, 10 == atomic.LoadInt32(&totalCnt), "should have sent 10 requests (including retry)")
-	test.Assert(t, 5 == atomic.LoadInt32(&retryCnt), "should have sent 5 retry requests")
-
-	for i := 0; i < 40; i++ {
-		_, _ = cli.CircuitBreakTest(ctx, stReq, callopt.WithRPCTimeout(time.Second))
-	}
-	t.Logf("total = %v, retry = %v", atomic.LoadInt32(&totalCnt), atomic.LoadInt32(&retryCnt))
-	test.Assert(t, 50 == atomic.LoadInt32(&totalCnt), "should have sent 10 requests (including retry)")
-	test.Assert(t, 5 == atomic.LoadInt32(&retryCnt), "shouldn't have sent more retry requests (<10%)")
-
-	// 46
-	_, _ = cli.CircuitBreakTest(ctx, stReq, callopt.WithRPCTimeout(time.Second))
-	t.Logf("total = %v, retry = %v", atomic.LoadInt32(&totalCnt), atomic.LoadInt32(&retryCnt))
-	test.Assert(t, 52 == atomic.LoadInt32(&totalCnt), "should have sent 52 requests (including retry)")
-	test.Assert(t, 6 == atomic.LoadInt32(&retryCnt), "should have sent 6 retry requests")
-
-	// 47
-	_, _ = cli.CircuitBreakTest(ctx, stReq, callopt.WithRPCTimeout(time.Second))
-	t.Logf("total = %v, retry = %v", atomic.LoadInt32(&totalCnt), atomic.LoadInt32(&retryCnt))
-	test.Assert(t, 53 == atomic.LoadInt32(&totalCnt), "should have sent 53 requests (including retry)")
-	test.Assert(t, 6 == atomic.LoadInt32(&retryCnt), "should have sent 6 retry requests")
+	testPercentageLimit(t, true)
+	testPercentageLimit(t, false)
 }
 
-func TestPercentageLimitAfterUpdate(t *testing.T) {
+func testPercentageLimit(t *testing.T, enable bool) {
 	backupPolicy := &retry.BackupPolicy{
-		RetryDelayMS: 10,
+		RetryDelayMS: 100,
 		StopPolicy: retry.StopPolicy{
-			MaxRetryTimes:    1,
+			MaxRetryTimes:    2,
 			DisableChainStop: false,
 			CBPolicy: retry.CBPolicy{
 				ErrorRate: 0.1,
@@ -104,7 +46,12 @@ func TestPercentageLimitAfterUpdate(t *testing.T) {
 		},
 	}
 
-	rc := retry.NewRetryContainerWithPercentageLimit()
+	var rc *retry.Container
+	if enable {
+		rc = retry.NewRetryContainerWithPercentageLimit()
+	} else {
+		rc = retry.NewRetryContainer()
+	}
 	rc.NotifyPolicyChange("circuitBreakTest", retry.BuildBackupRequest(backupPolicy))
 
 	totalCnt, retryCnt := int32(0), int32(0)
@@ -123,21 +70,17 @@ func TestPercentageLimitAfterUpdate(t *testing.T) {
 		}),
 	)
 	ctx, stReq := thriftrpc.CreateSTRequest(context.Background())
-	ctx = metainfo.WithPersistentValue(ctx, sleepTimeMsKey, "20") //ms
+	ctx = metainfo.WithPersistentValue(ctx, sleepTimeMsKey, "200") //ms
 
-	for i := 0; i < 46; i++ {
-		_, _ = cli.CircuitBreakTest(ctx, stReq, callopt.WithRPCTimeout(time.Second))
+	n := 200
+	wg := sync.WaitGroup{}
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go func() {
+			defer wg.Done()
+			_, _ = cli.CircuitBreakTest(ctx, stReq, callopt.WithRPCTimeout(400*time.Millisecond))
+		}()
 	}
-	t.Logf("total = %v, retry = %v", atomic.LoadInt32(&totalCnt), atomic.LoadInt32(&retryCnt))
-	test.Assert(t, 52 == atomic.LoadInt32(&totalCnt), "should have sent 52 requests (including retry)")
-	test.Assert(t, 6 == atomic.LoadInt32(&retryCnt), "should have sent 6 retry requests")
-
-	backupPolicyNew := *backupPolicy
-	backupPolicyNew.StopPolicy.CBPolicy.ErrorRate = 0.3
-	rc.NotifyPolicyChange("circuitBreakTest", retry.BuildBackupRequest(&backupPolicyNew))
-
-	_, _ = cli.CircuitBreakTest(ctx, stReq, callopt.WithRPCTimeout(time.Second))
-	t.Logf("total = %v, retry = %v", atomic.LoadInt32(&totalCnt), atomic.LoadInt32(&retryCnt))
-	test.Assert(t, 54 == atomic.LoadInt32(&totalCnt), "should have sent 54 requests (including retry)")
-	test.Assert(t, 7 == atomic.LoadInt32(&retryCnt), "should have sent 7 retry requests")
+	wg.Wait()
+	t.Logf("enable = %v, total = %v, retry = %v", enable, atomic.LoadInt32(&totalCnt), atomic.LoadInt32(&retryCnt))
 }

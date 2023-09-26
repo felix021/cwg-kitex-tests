@@ -89,15 +89,14 @@ func (*STServiceMockResultHandler) VisitOneway(ctx context.Context, req *stabili
 // CircuitBreakTest mock sleep which lead request do backup request
 func (h *STServiceMockResultHandler) CircuitBreakTest(ctx context.Context, req *stability.STRequest) (r *stability.STResponse, err error) {
 	// use ttheader
-	if _, exist := metainfo.GetPersistentValue(ctx, retry.TransitKey); !exist {
-		sleepTime := 200 * time.Millisecond
-		if value, exist := metainfo.GetPersistentValue(ctx, sleepTimeMsKey); exist {
-			if sleepTimeMS, err := strconv.Atoi(value); err == nil && sleepTimeMS > 0 {
-				sleepTime = time.Duration(sleepTimeMS) * time.Millisecond
-			}
+	sleepTime := 200 * time.Millisecond
+	if value, exist := metainfo.GetPersistentValue(ctx, sleepTimeMsKey); exist {
+		if sleepTimeMS, err := strconv.Atoi(value); err == nil && sleepTimeMS > 0 {
+			sleepTime = time.Duration(sleepTimeMS) * time.Millisecond
 		}
-		time.Sleep(sleepTime)
 	}
+	time.Sleep(sleepTime)
+
 	resp := &stability.STResponse{
 		Str:     req.Str,
 		Mp:      req.StringMap,
