@@ -12,5 +12,8 @@ header:
 
   paths-ignore:
     - 'kitex_gen/**/*.go;'
+    - 'thrift_streaming/kitex_gen/**/*.go'
+    - 'thrift_streaming/kitex_gen_slim/**/*.go'
+    - 'thrift_streaming/kitex_gen_old/**/*.go'
 
   comment: on-failure

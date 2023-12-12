@@ -1,0 +1,16 @@
+syntax = "proto3";
+package kitex_pb;
+// The greeting service definition.
+option go_package = "kitex_pb";
+
+message Request {
+string message = 1;
+}
+
+message Response {
+string message = 1;
+}
+
+service PBService {
+  rpc EchoPingPong (Request) returns (Response) {}
+}
