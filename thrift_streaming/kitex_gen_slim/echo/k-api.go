@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"github.com/apache/thrift/lib/go/thrift"
+
+	"github.com/cloudwego/kitex/pkg/streaming"
 )
 
 // unused protection
@@ -18,6 +20,7 @@ var (
 	_ = (*strings.Builder)(nil)
 	_ = reflect.Type(nil)
 	_ = thrift.TProtocol(nil)
+	_ = streaming.KitexUnusedProtection
 )
 
 type EchoServiceEchoBidirectionalArgs struct {

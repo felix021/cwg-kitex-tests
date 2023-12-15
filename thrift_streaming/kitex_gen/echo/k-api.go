@@ -11,6 +11,8 @@ import (
 	"github.com/apache/thrift/lib/go/thrift"
 
 	"github.com/cloudwego/kitex/pkg/protocol/bthrift"
+
+	"github.com/cloudwego/kitex/pkg/streaming"
 )
 
 // unused protection
@@ -21,6 +23,7 @@ var (
 	_ = reflect.Type(nil)
 	_ = thrift.TProtocol(nil)
 	_ = bthrift.BinaryWriter(nil)
+	_ = streaming.KitexUnusedProtection
 )
 
 func (p *EchoRequest) FastRead(buf []byte) (int, error) {
